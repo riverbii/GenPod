@@ -85,7 +85,7 @@ def generate_segment(args_tuple):
         return None
 
 
-def batch_generate(input_file, output_dir, seed=7470000, num_workers=None, min_chars=50, max_chars=200, logger=None):
+def batch_generate(input_file, output_dir, seed=2222, num_workers=None, min_chars=50, max_chars=200, logger=None):
     """并行生成多个段落音频
     
     参数：
@@ -206,8 +206,8 @@ def main():
     parser.add_argument(
         '-v', '--voice',
         type=str,
-        default='7470000',
-        help='随机种子（seed），默认：7470000'
+        default='2222',
+        help='随机种子（seed），默认：2222'
     )
     
     parser.add_argument(
@@ -247,7 +247,7 @@ def main():
     batch_generate(
         args.input_file,
         args.output_dir,
-        seed=int(args.voice) if args.voice.isdigit() else 7470000,
+        seed=int(args.voice) if args.voice.isdigit() else 2222,
         num_workers=args.jobs,
         min_chars=args.min_chars,
         max_chars=args.max_chars,

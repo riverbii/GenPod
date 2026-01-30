@@ -28,7 +28,7 @@ def load_config(input_dir):
     """Load config from genpod.toml in input directory, fallback to defaults"""
     config_path = input_dir / "genpod.toml"
     config = {
-        "voice_seed": 7470000,
+        "voice_seed": 2222,
         "min_chars": 50,
         "max_chars": 200,
         "welcome_audio": None,
