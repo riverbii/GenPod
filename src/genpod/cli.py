@@ -74,27 +74,33 @@ def compute_hash(text, seed):
     content = f"{text}{seed}"
     return hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
 
-def build_podcast(input_dir_str, output_dir_str=None, verbose=False, force=False):
-    """Build the full podcast from input directory"""
+def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, force=False):
+    """Build the full podcast from input name or directory"""
     logger = setup_logging(verbose)
     
-    input_dir = Path(input_dir_str).resolve()
+    # Path resolution logic
+    if workdir:
+        workdir_path = Path(workdir).resolve()
+        input_dir = workdir_path / "input" / input_name
+        if not output_dir_str:
+            output_base = workdir_path / "output"
+        else:
+            output_base = Path(output_dir_str).resolve()
+    else:
+        # Backwards compatibility: treat input_name as a direct path
+        input_dir = Path(input_name).resolve()
+        if not output_dir_str:
+            # Default to project project-root/output
+            output_base = Path.cwd() / "output"
+        else:
+            output_base = Path(output_dir_str).resolve()
+
     if not input_dir.exists():
         logger.error(f"Input directory not found: {input_dir}")
         sys.exit(1)
         
-    # Determine output directory
-    if output_dir_str:
-        output_dir = Path(output_dir_str).resolve()
-    else:
-        # Default: ../output from input or ./output
-        # Assuming structure: RiverPod/input/20260130 -> RiverPod/output/20260130...
-        date_name = input_dir.name
-        project_root = input_dir.parent.parent
-        output_dir = project_root / "output"
-        
-    outputs_base = output_dir / input_dir.name # e.g. output/20260130
-    segments_dir = output_dir / f"{input_dir.name}_segments"
+    output_dir = output_base / input_dir.name
+    segments_dir = output_base / f"{input_dir.name}_segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Building podcast for {input_dir.name}")
@@ -127,15 +133,6 @@ def build_podcast(input_dir_str, output_dir_str=None, verbose=False, force=False
     for i, text in enumerate(paragraphs, 1):
         # Hash text + seed to get unique ID
         seg_hash = compute_hash(text, seed)
-        audio_filename = f"segment_{i:03d}_{seg_hash}.wav"
-        audio_path = segments_dir / audio_filename
-        
-        # Also verify if any other file with same hash exists (ignoring index for reordering optimization? No, keep index for ordering)
-        # Actually, simpler: just check specific filename.
-        # If we insert a paragraph, indices shift. 
-        # Better: use ONLY hash for filename? 
-        #   segment_{hash}.wav
-        # And keep a list of files to concatenation order.
         audio_filename_hash_only = f"segment_{seg_hash}.wav"
         audio_path_hash_only = segments_dir / audio_filename_hash_only
         
@@ -151,20 +148,15 @@ def build_podcast(input_dir_str, output_dir_str=None, verbose=False, force=False
     # 3. Concatenate Segments (Dry)
     # The order is strictly preserved by the order of paragraphs in the script
     from .concatenate_podcast import concatenate_segments, concatenate_full_podcast
-    dry_file = output_dir / f"{input_dir.name}_dry.wav"
+    dry_file = output_base / f"{input_dir.name}_dry.wav"
     concatenate_segments(segment_files, str(dry_file), fade_duration=config["fade_duration"])
     
     # 4. Final Mix (Full)
-    final_file = output_dir / f"{input_dir.name}_final.wav"
+    final_file = output_base / f"{input_dir.name}_final.wav"
     
     # Resolve assets
     # Welcome
     welcome_file = config["welcome_audio"]
-    if not welcome_file:
-         # Default check: sources/welcome.mp3 or assets/welcome.mp3
-         # But for now, just keep it None if not specified
-         pass
-         
     # Outro
     outro_file = config["outro_bgm"]
     
@@ -178,19 +170,20 @@ def build_podcast(input_dir_str, output_dir_str=None, verbose=False, force=False
             str(final_file), 
             fade_duration=config["fade_duration"]
         )
-    else:
-        # If user only provides logic for segments but wants to do mixing later manually
-        pass
         
     logger.info(f"Build complete!")
     logger.info(f"  Final: {final_file if (welcome_file and outro_file) else 'N/A'}")
     logger.info(f"  Dry:   {dry_file}")
     logger.info(f"  Segments: {segments_dir}")
 
-def check_script(input_dir_str, verbose=False):
+def check_script(input_name, workdir=None, verbose=False):
     """Check script segmentation without generating audio"""
     logger = setup_logging(verbose)
-    input_dir = Path(input_dir_str).resolve()
+    
+    if workdir:
+        input_dir = Path(workdir).resolve() / "input" / input_name
+    else:
+        input_dir = Path(input_name).resolve()
     
     if not input_dir.exists():
         logger.error(f"Input directory not found: {input_dir}")
@@ -229,22 +222,25 @@ def main():
     
     # Build Command
     build_parser = subparsers.add_parser("build", help="Build podcast from input directory")
-    build_parser.add_argument("input_dir", help="Path to input directory (e.g. input/20260130)")
+    build_parser.add_argument("input", help="Path to input directory or episode name")
+    build_parser.add_argument("-w", "--workdir", help="Base workspace directory")
     build_parser.add_argument("-o", "--output", help="Output directory root")
     build_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     build_parser.add_argument("-f", "--force", action="store_true", help="Force regenerate all segments")
     
     # Check Command
     check_parser = subparsers.add_parser("check", help="Check script segmentation")
-    check_parser.add_argument("input_dir", help="Path to input directory")
+    check_parser.add_argument("input", help="Path to input directory or episode name")
+    check_parser.add_argument("-w", "--workdir", help="Base workspace directory")
     check_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     
     args = parser.parse_args()
     
     if args.command == "build":
-        build_podcast(args.input_dir, args.output, args.verbose, args.force)
+        build_podcast(args.input, args.output, args.workdir, args.verbose, args.force)
     elif args.command == "check":
-        check_script(args.input_dir, args.verbose)
+        check_script(args.input, args.workdir, args.verbose)
+
 
 
 if __name__ == "__main__":
