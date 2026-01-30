@@ -14,11 +14,9 @@ dependencies = [
     "soundfile>=0.13.0",
     "pydub>=0.25.1",
     "numpy<2.0",
+    "tomli>=2.0.1; python_version < '3.11'",
 ]
 
 [project.scripts]
-genpod-batch = "genpod.batch_generate:main"
-genpod-single = "genpod.generate_podcast:main"
-genpod-concat = "genpod.concatenate_podcast:main"
-genpod-mix = "genpod.mix_podcast:main"
-genpod-sources = "genpod.generate_sources:main"
+genpod = "genpod.cli:main"
+
