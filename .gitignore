@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Project-specific directories (user-generated content)
+tmp/
+input/
+output/
+sources/
+logs/
+
+# Published episodes (audio files managed by Git LFS, markdown files tracked)
+# Note: Audio files are tracked by Git LFS, not ignored
+
+# Model files (too large for Git)
+asset/
+
+# Generated audio files
+docs/audio/
+*.wav
+*.mp3
+*.m4a
+*.flac
+
+# Large files
+*.safetensors

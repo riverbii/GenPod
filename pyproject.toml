@@ -1,0 +1,24 @@
+[project]
+name = "genpod"
+version = "0.1.0"
+description = "A podcast generation tool using ChatTTS"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "asyncio>=4.0.0",
+    "edge-tts>=7.2.7",
+    "openai>=2.15.0",
+    "chattts @ git+https://github.com/2noise/ChatTTS",
+    "torch>=2.0.0,<2.3.0",
+    "torchaudio>=2.0.0,<2.3.0",
+    "soundfile>=0.13.0",
+    "pydub>=0.25.1",
+    "numpy<2.0",
+]
+
+[project.scripts]
+genpod-batch = "genpod.batch_generate:main"
+genpod-single = "genpod.generate_podcast:main"
+genpod-concat = "genpod.concatenate_podcast:main"
+genpod-mix = "genpod.mix_podcast:main"
+genpod-sources = "genpod.generate_sources:main"
