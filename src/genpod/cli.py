@@ -25,8 +25,14 @@ def setup_logging(verbose=False):
 logger = logging.getLogger(__name__)
 
 def load_config(input_dir):
-    """Load config from genpod.toml in input directory, fallback to defaults"""
-    config_path = input_dir / "genpod.toml"
+    """
+    Load config with precedence: 
+    1. Episode config (input_dir/genpod.toml)
+    2. Local config (./genpod.toml)
+    3. Global config (~/.genpod.toml)
+    4. Defaults
+    """
+    # 4. Defaults
     config = {
         "voice_seed": 2222,
         "min_chars": 50,
@@ -36,14 +42,30 @@ def load_config(input_dir):
         "fade_duration": 500
     }
     
-    if config_path.exists():
-        try:
-            with open(config_path, "rb") as f:
-                user_config = tomllib.load(f)
-                config.update(user_config)
-                logger.info(f"Loaded config from {config_path}")
-        except Exception as e:
-            logger.warning(f"Failed to load config from {config_path}: {e}")
+    # helper to merge config
+    def merge_from_file(path, name):
+        if path.exists():
+            try:
+                with open(path, "rb") as f:
+                    user_config = tomllib.load(f)
+                    config.update(user_config)
+                    logger.info(f"Loaded {name} config from {path}")
+            except Exception as e:
+                logger.warning(f"Failed to load {name} config from {path}: {e}")
+
+    # 3. Global Configuration (~/.genpod.toml)
+    global_config = Path.home() / ".genpod.toml"
+    merge_from_file(global_config, "global")
+    
+    # 2. Local Configuration (./genpod.toml) - only if different from input_dir
+    local_config = Path.cwd() / "genpod.toml"
+    # Ensure we don't load the same file twice if input_dir is current dir
+    if local_config.resolve() != (input_dir / "genpod.toml").resolve():
+        merge_from_file(local_config, "local")
+
+    # 1. Episode Configuration (input_dir/genpod.toml)
+    episode_config = input_dir / "genpod.toml"
+    merge_from_file(episode_config, "episode")
             
     return config
 
