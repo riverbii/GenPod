@@ -11,6 +11,8 @@ import ChatTTS
 import torch
 import torchaudio
 
+from .pronunciations import DEFAULT_PRONUNCIATIONS
+
 
 def setup_logging(log_file=None):
     """设置日志记录"""
@@ -96,11 +98,43 @@ def get_chat_instance():
     return _chat_instance
 
 
-def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None):
+def apply_pronunciations(text, dictionary):
+    """Apply pronunciation replacements from dictionary (case-insensitive for keys)"""
+    if not dictionary:
+        return text
+        
+    for word, replacement in dictionary.items():
+        # Use simple string replacement for now, or regex for whole words
+        # Replaces all occurrences, case-insensitive logic handled by user input typically
+        # But here we do simple replace to keep it predictable
+        text = text.replace(str(word), str(replacement))
+    return text
+
+
+def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None, pronunciations=None):
     """生成音频文件（使用 ChatTTS）"""
     if logger is None:
         logger = logging.getLogger(__name__)
     
+    # Check if text is empty
+    if not text or not text.strip():
+        logger.warning(f"Empty text for output {output_file}, skipping generation.")
+        return
+
+    # Apply pronunciation replacements
+    # Merge user provided pronunciations with defaults
+    # User config overrides defaults
+    combined_pronunciations = DEFAULT_PRONUNCIATIONS.copy()
+    if pronunciations:
+        combined_pronunciations.update(pronunciations)
+
+    # Use combined dictionary
+    if combined_pronunciations:
+        original_text = text
+        text = apply_pronunciations(text, combined_pronunciations)
+        if text != original_text:
+            logger.info(f"  Applied pronunciation fixes. Text modified.")
+
     chat = get_chat_instance()
     
     # 统计文字数量

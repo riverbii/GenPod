@@ -1,0 +1,62 @@
+# GenPod - 播客项目配置文件
+
+# ---------------------------------------------------------
+# 1. 语音生成设置 (Audio Synthesis)
+# ---------------------------------------------------------
+# 语音种子：决定了播音员的音色。
+# 提示：使用 `genpod audition` 可以随机海选种子，选出你最喜欢的声音后填在这里。
+voice_seed = 2222
+
+# 文本切分设置：
+# 生成音频时，脚本会被切分成段落。每个段落的字符数将控制在 min 和 max 之间。
+# 提示：ChatTTS 在 100-200 字之间表现最稳定。
+min_chars = 50
+max_chars = 200
+
+# ---------------------------------------------------------
+# 2. 自动化资产 (Automated Assets)
+# ---------------------------------------------------------
+# 片头与背景音乐：构建单期节目时会自动混入的内容。
+# 路径建议：使用相对于项目根目录的相对路径。
+# welcome_audio = "assets/welcome/welcome_01.wav"
+# outro_bgm = "assets/bgm/bgm_01.mp3"
+fade_duration = 500
+
+# ---------------------------------------------------------
+# 3. 播客频道元数据 (RSS / Feed Metadata)
+# ---------------------------------------------------------
+# 下面的信息将决定播客在 Apple Podcasts, Spotify, 小宇宙等客户端的展示效果。
+
+# 播客名称
+podcast_title = "我的 AI 播客"
+
+# 播客简介 (Shownotes)
+podcast_description = "这是一个由人工智能全自动生成的播客频道。"
+
+# 播客主页：通常是你的 GitHub Pages 首页
+podcast_link = "https://yourname.github.io/my-podcast"
+
+# 播客语言 (zh-cn, en-us 等)
+podcast_language = "zh-cn"
+
+# 作者与联系方式
+podcast_author = "作者"
+podcast_email = "hello@example.com"
+
+# 播客海报图片 URL
+podcast_image = "https://yourname.github.io/my-podcast/cover.jpg"
+
+# 播客分类 (例如: Technology, News, Society & Culture)
+podcast_category = "Technology"
+
+# 版权声明
+podcast_copyright = "2026 Author"
+
+# ---------------------------------------------------------
+# 4. 高级发布设置 (Advanced Deployment)
+# ---------------------------------------------------------
+# 如果你的音频文件独立存放（例如外部 CDN 或 GitHub Pages 的特定目录），请配置前缀。
+# 生成 RSS 时，音频下载链接将拼接为：{podcast_audio_url_prefix}/{filename}
+# 默认为空，自动使用 {podcast_link}/audio
+# 对于 GitHub Pages 部署，默认即推荐（音频存放在 docs/audio 下）。
+# podcast_audio_url_prefix = "https://yourname.github.io/my-podcast/audio"

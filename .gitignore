@@ -1,33 +1,21 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
 
-# Virtual environments
-.venv
-
-# Project-specific directories (user-generated content)
-tmp/
+# GenPod Workspace
+workspace/
 input/
 output/
 sources/
 logs/
+tmp/
 
-# Published episodes (audio files managed by Git LFS, markdown files tracked)
-# Note: Audio files are tracked by Git LFS, not ignored
-
-# Model files (too large for Git)
+# Model Files
 asset/
+*.safetensors
 
-# Generated audio files
-docs/audio/
+# Large Audio Files (Managed via Git LFS in production)
 *.wav
 *.mp3
 *.m4a
 *.flac
 
-# Large files
-*.safetensors
+# Local config overrides
+.genpod.toml
