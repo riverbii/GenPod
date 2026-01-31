@@ -79,33 +79,17 @@ def load_config(input_dir):
 
     # 1. Episode/Project Configuration (search up from input_dir)
     # Search up the directory tree from input_dir for genpod.toml
-    current_search = input_dir.resolve()
-    # Limit search to avoid hitting root too easily, say 5 levels or until system root
-    found_project_config = False
-    
-    # Check input_dir itself first
     if (input_dir / "genpod.toml").exists():
         merge_from_file(input_dir / "genpod.toml", "episode_folder")
-        found_project_config = True
+        config["__project_root__"] = str(input_dir)
+    else:
+        # If no episode config, use input_dir as default root if not set by local/global
+        # But actually, if local_config was loaded and is different, that might be the root.
+        # Let's rely on standard logic:
+        # If we are running from project root, local_config is loaded.
+        pass
         
-    # Search upwards
-    for _ in range(5):
-        if current_search == current_search.parent: # Hit root
-            break
-        
-        current_search = current_search.parent
-        config_candidate = current_search / "genpod.toml"
-        
-        # Avoid reloading if it's the same as local_config we already loaded
-        if config_candidate.exists() and config_candidate.resolve() != local_config.resolve():
-            merge_from_file(config_candidate, f"project_root({current_search.name})")
-            config["__project_root__"] = str(current_search) # Store root for asset resolution
-            found_project_config = True
-            break 
-            
-    if not found_project_config:
-         # Fallback to input_dir if no explicit config found up the tree
-         config["__project_root__"] = str(input_dir)
+    return config
             
     return config
 
@@ -153,8 +137,12 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
         script_filename = input_path.name
         
         # [Fix]: Smart detection of episode name from directory structure
-        if "_segments_md" in input_dir.name:
-             episode_name = input_dir.name.replace("_segments_md", "")
+        # [Fix]: Smart detection of episode name from directory structure
+        if input_dir.name == "segments_md" or input_dir.name.endswith("_segments_md"):
+             if input_dir.name == "segments_md":
+                 episode_name = input_dir.parent.name
+             else:
+                 episode_name = input_dir.name.replace("_segments_md", "")
         else:
              episode_name = input_path.stem
              
@@ -393,15 +381,19 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     
     # If assets provided, do full mix
     logger.info(f"Config Check - Welcome: {welcome_file}, Outro: {outro_file}")
-    if welcome_file and outro_file:
-        logger.info(f"Creating final mix with welcome={welcome_file}, outro={outro_file}")
-        concatenate_full_podcast(
-            str(dry_file), 
-            welcome_file, 
-            outro_file, 
-            str(final_file), 
-            fade_duration=config["fade_duration"]
-        )
+    
+    if not is_segment_file:
+        if welcome_file and outro_file:
+            logger.info(f"Creating final mix with welcome={welcome_file}, outro={outro_file}")
+            concatenate_full_podcast(
+                str(dry_file), 
+                welcome_file, 
+                outro_file, 
+                str(final_file), 
+                fade_duration=config["fade_duration"]
+            )
+    else:
+        logger.info("✅ Single segment generation complete. Skipped full podcast assembly.")
         
     logger.info(f"Build complete!")
     logger.info(f"  Final: {final_file if (welcome_file and outro_file) else 'N/A'}")
