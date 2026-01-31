@@ -130,200 +130,99 @@ def split_by_paragraph(text):
 
 
 def merge_paragraphs(paragraphs, min_chars=50, max_chars=200):
-    """智能合并段落
+    """智能合并段落 - 贪婪模式
     参数：
         paragraphs: 段落列表
-        min_chars: 最小字数，低于此值会合并多个段落
-        max_chars: 最大字数，超过此值会拆分段落
+        min_chars: 最小字数
+        max_chars: 最大字数
     返回：
         合并后的段落列表
     """
     if not paragraphs:
         return []
     
-    def split_long_text(text, max_len, depth=0):
-        """拆分超长文本为多个段落，保持清洗后的格式（每句一行）
-        
-        参数：
-            text: 要拆分的文本
-            max_len: 最大长度
-            depth: 递归深度（防止无限递归）
-        """
-        # 防止无限递归
-        if depth > 10:
-            # 如果递归深度超过10，强制截断
-            return [text[:max_len]] if len(text) > max_len else [text]
-        
-        if len(text) <= max_len:
+    # 辅助函数：拆分超长文本
+    def split_recursive(text, limit):
+        if len(text) <= limit:
             return [text]
         
-        # 检查文本格式：如果包含换行符，说明是清洗后的格式（每句一行）
-        if '\n' in text:
-            # 按行拆分（每行是一句）
-            lines = text.split('\n')
-            lines = [line.strip() for line in lines if line.strip()]
-        else:
-            # 如果没有换行符，按句号拆分
-            lines = [s.strip() + '。' for s in text.split('。') if s.strip()]
+        # 寻找最佳切割点（句号、问号、叹号等）
+        split_point = -1
+        # 优先在后半部分找句末标点
+        for char in ['。', '！', '？', '……', '；', '，']:
+            pos = text.rfind(char, 0, limit)
+            if pos > limit * 0.5: # 至少保留一半
+                split_point = pos + 1
+                break
         
-        result = []
-        current = []
-        current_len = 0
-        
-        for line in lines:
-            line_len = len(line)
+        if split_point == -1:
+            # 没找到标点，硬切
+            split_point = limit
             
-            # 如果单个句子就超过max_len，需要特殊处理
-            if line_len > max_len:
-                # 先保存当前累积的内容
-                if current:
-                    seg = '\n'.join(current)
-                    result.append(seg)
-                    current = []
-                    current_len = 0
-                
-                # 尝试在句子内找合适的截断点（句号、逗号、[break_6]等）
-                # 如果找不到，就强制截断
-                if line_len > max_len:
-                    # 尝试在max_len附近找句号、逗号或[break_6]
-                    cut_pos = max_len
-                    for marker in ['。', '，', '[break_6]', '。', '、']:
-                        pos = line.rfind(marker, 0, max_len)
-                        if pos > max_len * 0.7:  # 至少要在70%的位置
-                            cut_pos = pos + len(marker)
-                            break
-                    
-                    # 截断并保存前半部分
-                    first_part = line[:cut_pos].strip()
-                    remaining_part = line[cut_pos:].strip()
-                    
-                    if first_part:
-                        result.append(first_part)
-                    if remaining_part:
-                        # 递归处理剩余部分
-                        if len(remaining_part) > max_len:
-                            result.extend(split_long_text(remaining_part, max_len, depth + 1))
-                        else:
-                            current.append(remaining_part)
-                            current_len = len(remaining_part)
-                else:
-                    current.append(line)
-                    current_len = line_len
-            elif current_len + line_len >= max_len and current:
-                # 保存当前累积（保持每句一行的格式）
-                # 注意：这里current_len是累积长度（不包括换行符），seg是实际文本（包括换行符）
-                # 需要检查实际文本长度是否超过max_len
-                seg = '\n'.join(current)
-                seg_len = len(seg)
-                
-                # 如果当前累积的内容不超过max_len，且加上新行也不会超过max_len，继续累积
-                # 否则保存当前累积，把新行放到下一个段落
-                if seg_len <= max_len and seg_len + line_len + 1 <= max_len:  # +1是换行符
-                    current.append(line)
-                    current_len += line_len
-                else:
-                    # 保存当前累积的内容
-                    if seg_len <= max_len:
-                        result.append(seg)
-                    else:
-                        # 如果超过max_len，需要拆分
-                        result.extend(split_long_text(seg, max_len, depth + 1))
-                    current = [line]
-                    current_len = line_len
-            else:
-                current.append(line)
-                current_len += line_len
-        
-        # 保存剩余的段落
-        if current:
-            seg = '\n'.join(current)
-            # 确保剩余段落不超过max_len
-            if len(seg) > max_len:
-                # 如果超过max_len，尝试拆分
-                result.extend(split_long_text(seg, max_len, depth + 1))
-            else:
-                result.append(seg)
-        
-        return result
-    
-    # 目标字数：尽量让每个合并后的段落在合理范围内
-    target_chars = max_chars * 0.75  # 150字左右
-    
+        return [text[:split_point]] + split_recursive(text[split_point:], limit)
+
     merged = []
-    current_segment = []
-    current_length = 0
+    current_buffer = ""
     
     for para in paragraphs:
-        para_length = len(para)
-        
-        # 如果当前段落超过最大值，先拆分
-        if para_length > max_chars:
-            # 先保存当前累积的段落
-            if current_segment:
-                seg_text = '\n\n'.join(current_segment)
-                if len(seg_text) > max_chars:
-                    # 如果累积的段落也超过最大值，需要拆分
-                    merged.extend(split_long_text(seg_text, max_chars, 0))
-                else:
-                    merged.append(seg_text)
-                current_segment = []
-                current_length = 0
+        # 清理多余空行，保持紧凑
+        para = para.strip()
+        if not para:
+            continue
             
-            # 拆分超长段落
-            merged.extend(split_long_text(para, max_chars, 0))
+        # 预测合并后的长度
+        # 加上换行符作为连接
+        if current_buffer:
+            predicted_len = len(current_buffer) + 1 + len(para)
         else:
-            # 检查合并后是否会超过最大值
-            if current_length + para_length > max_chars and current_segment:
-                # 保存当前累积
-                seg_text = '\n\n'.join(current_segment)
-                if len(seg_text) > max_chars:
-                    merged.extend(split_long_text(seg_text, max_chars, 0))
-                else:
-                    merged.append(seg_text)
-                current_segment = [para]
-                current_length = para_length
+            predicted_len = len(para)
+            
+        # 决策逻辑：
+        # 1. 如果加上当前段落不超过 max_chars，直接合并
+        if predicted_len <= max_chars:
+            if current_buffer:
+                current_buffer += "\n" + para
             else:
-                # 继续累积
-                current_segment.append(para)
-                current_length += para_length
+                current_buffer = para
+        else:
+            # 2. 如果加上会超过，说明当前 buffer 此刻是满的（或者虽然不满但加不进去了）
+            #    先把 current_buffer 处理掉
+            if current_buffer:
+                # 检查 buffer 是否过长（虽然逻辑上控制了，但防万一）
+                if len(current_buffer) > max_chars:
+                    merged.extend(split_recursive(current_buffer, max_chars))
+                else:
+                    merged.append(current_buffer)
                 
-                # 如果累积长度达到目标字数或接近最大值，保存
-                if current_length >= target_chars or current_length >= max_chars * 0.9:
-                    seg_text = '\n\n'.join(current_segment)
-                    if len(seg_text) > max_chars:
-                        merged.extend(split_long_text(seg_text, max_chars, 0))
-                        current_segment = []
-                        current_length = 0
-                    else:
-                        merged.append(seg_text)
-                        current_segment = []
-                        current_length = 0
-    
-    # 保存剩余的段落
-    if current_segment:
-        seg_text = '\n\n'.join(current_segment)
-        if len(seg_text) > max_chars:
-            merged.extend(split_long_text(seg_text, max_chars, 0))
-        else:
-            # 如果剩余段落太短，尝试合并到上一个段落
-            if len(seg_text) < min_chars and merged:
-                last_length = len(merged[-1])
-                if last_length + len(seg_text) <= max_chars:
-                    merged[-1] = merged[-1] + '\n\n' + seg_text
-                else:
-                    merged.append(seg_text)
+                # 重置 buffer
+                current_buffer = ""
+            
+            # 3. 处理当前的这个 para（因为它没挤进去）
+            #    如果 para 本身就很长，直接切分
+            if len(para) > max_chars:
+                splits = split_recursive(para, max_chars)
+                # 最后一个片段可能很短，留给 buffer
+                merged.extend(splits[:-1])
+                current_buffer = splits[-1]
             else:
-                merged.append(seg_text)
-    
-    # 最终检查：确保所有段落都不超过max_chars
-    final_merged = []
-    for seg in merged:
-        if len(seg) > max_chars:
-            final_merged.extend(split_long_text(seg, max_chars, 0))
-        else:
-            final_merged.append(seg)
-    
-    return final_merged
+                current_buffer = para
+                
+    # 处理最后的缓冲区
+    if current_buffer:
+         if len(current_buffer) > max_chars:
+             merged.extend(split_recursive(current_buffer, max_chars))
+         else:
+             # 尝试合并到上一个（如果太短）
+             if len(current_buffer) < min_chars and merged:
+                 last = merged[-1]
+                 if len(last) + 1 + len(current_buffer) <= max_chars:
+                     merged[-1] = last + "\n" + current_buffer
+                 else:
+                     merged.append(current_buffer)
+             else:
+                 merged.append(current_buffer)
+                 
+    return merged
 
 
 def filter_markdown_metadata(content):

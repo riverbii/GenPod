@@ -77,9 +77,35 @@ def load_config(input_dir):
     if local_config.resolve() != (input_dir / "genpod.toml").resolve():
         merge_from_file(local_config, "local")
 
-    # 1. Episode Configuration (input_dir/genpod.toml)
-    episode_config = input_dir / "genpod.toml"
-    merge_from_file(episode_config, "episode")
+    # 1. Episode/Project Configuration (search up from input_dir)
+    # Search up the directory tree from input_dir for genpod.toml
+    current_search = input_dir.resolve()
+    # Limit search to avoid hitting root too easily, say 5 levels or until system root
+    found_project_config = False
+    
+    # Check input_dir itself first
+    if (input_dir / "genpod.toml").exists():
+        merge_from_file(input_dir / "genpod.toml", "episode_folder")
+        found_project_config = True
+        
+    # Search upwards
+    for _ in range(5):
+        if current_search == current_search.parent: # Hit root
+            break
+        
+        current_search = current_search.parent
+        config_candidate = current_search / "genpod.toml"
+        
+        # Avoid reloading if it's the same as local_config we already loaded
+        if config_candidate.exists() and config_candidate.resolve() != local_config.resolve():
+            merge_from_file(config_candidate, f"project_root({current_search.name})")
+            config["__project_root__"] = str(current_search) # Store root for asset resolution
+            found_project_config = True
+            break 
+            
+    if not found_project_config:
+         # Fallback to input_dir if no explicit config found up the tree
+         config["__project_root__"] = str(input_dir)
             
     return config
 
@@ -353,10 +379,17 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     final_file = output_base / f"{input_dir.name}_final.mp3" # [Change] Default to mp3 for final
     
     # Resolve assets
+    project_root = Path(config.get("__project_root__", Path.cwd()))
+    
     # Welcome
     welcome_file = config["welcome_audio"]
+    if welcome_file and not Path(welcome_file).is_absolute():
+        welcome_file = str(project_root / welcome_file)
+        
     # Outro
     outro_file = config["outro_bgm"]
+    if outro_file and not Path(outro_file).is_absolute():
+        outro_file = str(project_root / outro_file)
     
     # If assets provided, do full mix
     logger.info(f"Config Check - Welcome: {welcome_file}, Outro: {outro_file}")
