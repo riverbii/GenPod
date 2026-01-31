@@ -17,5 +17,9 @@ asset/
 *.m4a
 *.flac
 
+
 # Local config overrides
 .genpod.toml
+
+# IDE Rules
+.cursorrules

@@ -31,8 +31,12 @@ def concatenate_segments(segment_files, output_file, fade_duration=500):
     for seg in segments[1:]:
         combined = combined + pause + seg
     
-    # 保存
-    combined.export(output_file, format="wav")
+    # [Fix] 根据文件后缀自动选择格式，支持 MP3 压缩
+    fmt = Path(output_file).suffix.lower().replace('.', '') or "wav"
+    if fmt == "mp3":
+        combined.export(output_file, format="mp3", bitrate="192k")
+    else:
+        combined.export(output_file, format=fmt)
     print(f"✅ 段落拼接完成: {output_file}")
 
 
@@ -45,17 +49,22 @@ def concatenate_full_podcast(dry_audio_file, welcome_file, outro_file, output_fi
     dry = AudioSegment.from_file(dry_audio_file)
     outro = AudioSegment.from_file(outro_file)
     
-    # 添加淡入淡出效果
-    welcome = welcome.fade_in(fade_duration).fade_out(fade_duration)
-    dry = dry.fade_in(fade_duration).fade_out(fade_duration)
-    outro = outro.fade_in(fade_duration).fade_out(fade_duration)
+    # [Optimize] 移除多余的淡入淡出。由于音频本身包含人声，过度淡入会导致开头被吞。
+    # 片头片尾的背景音乐通常已自带淡入淡出，或由拼接时的静音隔离。
+    # welcome = welcome.fade_in(fade_duration).fade_out(fade_duration)
+    # dry = dry.fade_in(fade_duration).fade_out(fade_duration)
+    # outro = outro.fade_in(fade_duration).fade_out(fade_duration)
     
     # 拼接：欢迎语 + 短暂停顿 + 干音 + 短暂停顿 + 结束语
     pause = AudioSegment.silent(duration=500)
     final = welcome + pause + dry + pause + outro
     
-    # 保存
-    final.export(output_file, format="wav")
+    # [Fix] 导出为 MP3 並设置 192k 码率，确保高质量压缩
+    fmt = Path(output_file).suffix.lower().replace('.', '') or "wav"
+    if fmt == "mp3":
+        final.export(output_file, format="mp3", bitrate="192k")
+    else:
+        final.export(output_file, format=fmt)
     print(f"✅ 完整播客拼接完成: {output_file}")
 
 

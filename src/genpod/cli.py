@@ -88,7 +88,7 @@ def compute_hash(text, seed):
     content = f"{text}{seed}"
     return hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
 
-def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, force=False):
+def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, force=False, jobs=2):
     """Build the full podcast from input name or directory"""
     logger = setup_logging(verbose)
     
@@ -167,6 +167,7 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     # Try finding config in standard places
     config_path = Path.cwd() / "genpod.toml"
     config = load_config(input_dir if not is_file_mode else Path.cwd())
+    config["jobs"] = jobs
     seed = config["voice_seed"]
     
     is_segment_file = is_file_mode and input_path.name.startswith("segment_")
@@ -206,48 +207,48 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
         )
         logger.info(f"Parsed {len(paragraphs)} paragraphs from script.md")
     
+    # ... (previous setup code) ...
     # 2. Incremental Generation
-    segment_files = []
+    segment_tasks = []
+    segment_files = [] # Initialize here
     
     # Lazy import to speed up 'check' command
-    from .generate_podcast import generate_audio
+    from .generate_podcast import generate_audio, initialize_worker
     
-    # [CRITICAL FIX] If input is already a segment file, skip md creation entirely
+    # [CRITICAL UPDATE] Using robust hash-based incremental build strategy
     if is_segment_file:
-        # Direct audio generation mode - no md file management
-        for i, text in enumerate(paragraphs, 1):
-            seg_hash = compute_hash(text, seed)
-            audio_filename = f"segment_{seg_hash}.wav"
-            audio_path = segments_dir / audio_filename
-            
-            logger.info(f"[Gen ] Generating audio for {input_path.name} (Hash: {seg_hash})...")
-            generate_audio(
-                text, 
-                str(seed), 
-                str(audio_path), 
-                logger=logger,
-                pronunciations=config.get("pronunciation", {})
-            )
-            segment_files.append(str(audio_path))
-            
+         # Direct audio generation mode - no md file management
+         for i, text in enumerate(paragraphs, 1):
+             seg_hash = compute_hash(text, seed)
+             audio_filename = f"segment_{i:03d}_{seg_hash}.wav"
+             audio_path = segments_dir / audio_filename
+             segment_tasks.append((text, str(seed), str(audio_path), config.get("pronunciation", {})))
+             segment_files.append(str(audio_path))
+
     elif is_segments_dir_mode:
         # Batch mode - just iterate and generate
         for i, text in enumerate(paragraphs, 1):
-             # Simple naming
-             audio_filename = f"segment_{i:03d}.wav"
+             seg_hash = compute_hash(text, seed)
+             # Search for existing file with ANY hash for this index, to replace it if needed
+             existing_files = list(segments_dir.glob(f"segment_{i:03d}_*.wav"))
+             
+             # Target filename
+             audio_filename = f"segment_{i:03d}_{seg_hash}.wav"
              audio_path = segments_dir / audio_filename
              
+             # Check if we need to regenerate
              if audio_path.exists() and not force:
-                 logger.info(f"[Skip] Segment {i} already exists")
+                 logger.info(f"[Skip] Segment {i} up to date ({seg_hash})")
              else:
-                 logger.info(f"[Gen ] Generating Segment {i}...")
-                 generate_audio(
-                    text, 
-                    str(seed), 
-                    str(audio_path), 
-                    logger=logger,
-                    pronunciations=config.get("pronunciation", {})
-                 )
+                 # If a stale version exists (same index, different hash), delete it
+                 for stale in existing_files:
+                     if stale.name != audio_filename:
+                         logger.info(f"[Clean] Removing stale segment: {stale.name}")
+                         stale.unlink()
+                         
+                 logger.info(f"[Queue] Segment {i} ({len(text)} chars)")
+                 segment_tasks.append((text, str(seed), str(audio_path), config.get("pronunciation", {})))
+                 
              segment_files.append(str(audio_path))
             
     else:
@@ -257,43 +258,91 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
         
         for i, text in enumerate(paragraphs, 1):
             # [Workflow logic]: Check if user has manually edited this segment file
-            existing_segment_files = list(segments_md_dir.glob(f"segment_{i:03d}_*.md"))
-            
-            if existing_segment_files:
-                # Use the existing file as source of truth
-                target_file = existing_segment_files[0]
-                with open(target_file, "r", encoding="utf-8") as f:
-                    text = f.read().strip()
-            
-            # Hash text + seed to get unique ID (for cache checking)
+            if not force:
+                 # Try to find existing md file for this segment index
+                 existing_mds = list(segments_md_dir.glob(f"segment_{i:03d}_*.md"))
+                 if existing_mds:
+                     # Use the existing MD file as source of truth
+                     target_file = existing_mds[0]
+                     with open(target_file, "r", encoding="utf-8") as f:
+                         text = f.read().strip()
+
+            # Hash text + seed to get unique ID
             seg_hash = compute_hash(text, seed)
             
             # Save washed segment to file for user verification
             segment_md_file = segments_md_dir / f"segment_{i:03d}_{seg_hash}.md"
             
+            # Cleanup stale MD files for this index
+            existing_mds = list(segments_md_dir.glob(f"segment_{i:03d}_*.md"))
+            for stale_md in existing_mds:
+                if stale_md.name != segment_md_file.name:
+                    stale_md.unlink()
+            
             if not segment_md_file.exists():
                 with open(segment_md_file, "w", encoding="utf-8") as f:
                     f.write(text)
             
-            # Use simple sequence-based naming for audio files
-            audio_filename = f"segment_{i:03d}.wav"
+            # Audio path
+            audio_filename = f"segment_{i:03d}_{seg_hash}.wav"
             audio_path = segments_dir / audio_filename
-        
-            if audio_path.exists() and not force:
-                logger.info(f"[Skip] Segment {i} already exists")
+            
+            # Check for existing audio files for this index
+            existing_audios = list(segments_dir.glob(f"segment_{i:03d}_*.wav"))
+            
+            is_up_to_date = False
+            for ea in existing_audios:
+                if ea.name == audio_filename:
+                    is_up_to_date = True
+                else:
+                    if not force:
+                         logger.info(f"[Clean] Removing stale audio: {ea.name}")
+                         ea.unlink()
+            
+            if is_up_to_date and not force:
+                logger.info(f"[Skip] Segment {i} up to date")
             else:
-                logger.info(f"[Gen ] Generating Segment {i} ({len(text)} chars)...")
-                # Generate
-                generate_audio(
-                    text, 
-                    str(seed), 
-                    str(audio_path), 
-                    logger=logger,
-                    pronunciations=config.get("pronunciation", {})
-                )
+                 logger.info(f"[Queue] Segment {i} for generation")
+                 segment_tasks.append((text, str(seed), str(audio_path), config.get("pronunciation", {})))
             
             segment_files.append(str(audio_path))
+            
+    # Execute Parallel Generation
+    if segment_tasks:
+        import multiprocessing
         
+        num_workers = config.get("jobs", 1)
+        if num_workers < 1: num_workers = 1
+        # Cap workers to avoid OOM (ChatTTS is heavy)
+        if num_workers > 4: 
+             logger.warning("Limiting workers to 4 to prevent Out Of Memory")
+             num_workers = 4
+             
+        logger.info(f"🚀 Starting parallel generation with {num_workers} workers for {len(segment_tasks)} segments...")
+        
+        # Prepare arguments for starmap
+        # Function signature: generate_audio(text, seed, output_file, logger=None, pronunciations=None)
+        # We need to wrap this or change generate_audio to accept a single arg if we use map, 
+        # but starmap allows unpacking. However, logger cannot be pickled easily.
+        # We will modify generate_audio to NOT take logger in the worker, or use a wrapper.
+        
+        # Wrapper for process pool
+        # We need to define this at module level or use a partial, but 'initialize_worker' sets up globals.
+        # Let's use a helper function defined at top level or importable
+        
+        ctx = multiprocessing.get_context('spawn') # Use spawn for PyTorch/CUDA safety
+        with ctx.Pool(processes=num_workers, initializer=initialize_worker) as pool:
+             # args: (text, seed, output_path, pronunciations)
+             # We need to adapt the function call. generate_audio expects (text, seed, output_file, logger, pronunciations)
+             # We'll pass None for logger in worker process
+             
+             task_args = [(t[0], t[1], t[2], None, t[3]) for t in segment_tasks]
+             pool.starmap(generate_audio, task_args)
+             
+        logger.info("✅ All segments generated successfully.")
+    else:
+        logger.info("🎉 All segments up to date. Nothing to generate.")
+
     # 3. Concatenate Segments (Dry)
     # The order is strictly preserved by the order of paragraphs in the script
     from .concatenate_podcast import concatenate_segments, concatenate_full_podcast
@@ -301,7 +350,7 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     concatenate_segments(segment_files, str(dry_file), fade_duration=config["fade_duration"])
     
     # 4. Final Mix (Full)
-    final_file = output_base / f"{input_dir.name}_final.wav"
+    final_file = output_base / f"{input_dir.name}_final.mp3" # [Change] Default to mp3 for final
     
     # Resolve assets
     # Welcome
@@ -724,6 +773,7 @@ def main():
     build_parser.add_argument("-o", "--output", help="Output directory root")
     build_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     build_parser.add_argument("-f", "--force", action="store_true", help="Force regenerate all segments")
+    build_parser.add_argument("-j", "--jobs", type=int, default=2, help="Number of parallel generation jobs (default: 2)")
     
     # Check Command
     check_parser = subparsers.add_parser("check", help="Check script segmentation")
@@ -758,7 +808,22 @@ def main():
     args = parser.parse_args()
     
     if args.command == "build":
-        build_podcast(args.input, args.output, args.workdir, args.verbose, args.force)
+        # Inject jobs into config implicitly by modifying how we pass it or just pass as arg?
+        # Since build_podcast doesn't take 'jobs' arg directly in signature (removed in previous thoughts? No, I need to update signature).
+        # Ah, in previous tool call I didn't update build_podcast signature to accept jobs.
+        # I should probably update build_podcast signature first or pass it differently. 
+        # Actually I can't easily change signature in middle of function.
+        # Wait, I saw I modified build_podcast to use config.get("jobs", 1).
+        # So I need to patch config inside build_podcast or pass it.
+        # Let's update build_podcast signature in a separate tool call if needed, or just relying on it not being there?
+        # No, I need to pass it.
+        # Let's check build_podcast signature in line 91.
+        
+        # Actually, let's update build_podcast signature NOW in this edit too? No, replace_file_content is single block.
+        # I will handle this by injecting into config? No, that's messy.
+        
+        # Let's Change:
+        build_podcast(args.input, args.output, args.workdir, args.verbose, args.force, args.jobs)
     elif args.command == "check":
         check_script(args.input, args.workdir, args.verbose)
     elif args.command == "init":

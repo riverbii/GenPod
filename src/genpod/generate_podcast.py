@@ -1,5 +1,6 @@
 import argparse
 import logging
+import multiprocessing
 import os
 import re
 import sys
@@ -10,6 +11,8 @@ from pathlib import Path
 import ChatTTS
 import torch
 import torchaudio
+from pydub import AudioSegment
+from pydub.silence import detect_leading_silence
 
 from .pronunciations import DEFAULT_PRONUNCIATIONS
 
@@ -59,42 +62,54 @@ def read_markdown_file(file_path):
 # 全局 ChatTTS 实例（避免重复加载模型）
 _chat_instance = None
 
+
+def initialize_worker():
+    """多进程 Worker 初始化：每个进程加载一次模型"""
+    global _chat_instance
+    if _chat_instance is None:
+        _chat_instance = get_chat_instance()
+
+
 def get_chat_instance():
     """获取 ChatTTS 实例（单例模式）"""
     global _chat_instance
-    if _chat_instance is None:
-        # 检查本地是否有模型文件
-        # 优先查找当前目录下的 asset
-        project_root = Path.cwd()
-        asset_dir = project_root / "asset"
-        local_model_exists = (
-            (asset_dir / "Decoder.safetensors").exists() and
-            (asset_dir / "DVAE.safetensors").exists() and
-            (asset_dir / "Embed.safetensors").exists() and
-            (asset_dir / "Vocos.safetensors").exists() and
-            (asset_dir / "gpt" / "config.json").exists() and
-            (asset_dir / "gpt" / "model.safetensors").exists() and
-            (asset_dir / "tokenizer" / "tokenizer.json").exists()
-        )
+    if _chat_instance is not None:
+        return _chat_instance
+
+    # 检查本地是否有模型文件
+    # 优先查找当前目录下的 asset
+    project_root = Path.cwd()
+    asset_dir = project_root / "asset"
+    local_model_exists = (
+        (asset_dir / "Decoder.safetensors").exists() and
+        (asset_dir / "DVAE.safetensors").exists() and
+        (asset_dir / "Embed.safetensors").exists() and
+        (asset_dir / "Vocos.safetensors").exists() and
+        (asset_dir / "gpt" / "config.json").exists() and
+        (asset_dir / "gpt" / "model.safetensors").exists() and
+        (asset_dir / "tokenizer" / "tokenizer.json").exists()
+    )
+    
+    chat = ChatTTS.Chat()
+    
+    if local_model_exists:
+        print(f"[Process {os.getpid()}] 🔄 正在加载 ChatTTS 模型（使用本地模型文件）...")
+        # ChatTTS 会自动检测当前目录下的 asset 文件夹
+        # 切换到项目根目录，确保能找到 asset 目录
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(str(project_root))
+            chat.load(compile=False)  # compile=False 可以加快加载速度
+            print(f"[Process {os.getpid()}] ✅ 模型加载完成（使用本地文件）")
+        finally:
+            os.chdir(original_cwd)
+    else:
+        print(f"[Process {os.getpid()}] 🔄 正在加载 ChatTTS 模型（首次运行会从网络下载模型文件）...")
+        print("💡 提示：运行 download_models.sh 可以预先下载模型到本地，加快后续加载速度")
+        chat.load(compile=False)  # compile=False 可以加快加载速度
+        print(f"[Process {os.getpid()}] ✅ 模型加载完成")
         
-        if local_model_exists:
-            print("🔄 正在加载 ChatTTS 模型（使用本地模型文件）...")
-            # ChatTTS 会自动检测当前目录下的 asset 文件夹
-            # 切换到项目根目录，确保能找到 asset 目录
-            original_cwd = os.getcwd()
-            try:
-                os.chdir(str(project_root))
-                _chat_instance = ChatTTS.Chat()
-                _chat_instance.load(compile=False)  # compile=False 可以加快加载速度
-                print("✅ 模型加载完成（使用本地文件）")
-            finally:
-                os.chdir(original_cwd)
-        else:
-            print("🔄 正在加载 ChatTTS 模型（首次运行会从网络下载模型文件）...")
-            print("💡 提示：运行 download_models.sh 可以预先下载模型到本地，加快后续加载速度")
-            _chat_instance = ChatTTS.Chat()
-            _chat_instance.load(compile=False)  # compile=False 可以加快加载速度
-            print("✅ 模型加载完成")
+    _chat_instance = chat
     return _chat_instance
 
 
@@ -109,6 +124,12 @@ def apply_pronunciations(text, dictionary):
         # But here we do simple replace to keep it predictable
         text = text.replace(str(word), str(replacement))
     return text
+
+
+def match_target_amplitude(sound, target_dBFS):
+    """Standardize loudness to target dBFS"""
+    change_in_dBFS = target_dBFS - sound.dBFS
+    return sound.apply_gain(change_in_dBFS)
 
 
 def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None, pronunciations=None):
@@ -151,29 +172,112 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
     if rate or pitch:
         logger.warning("ChatTTS 不支持语速和音调调整，这些参数将被忽略")
     
-    # 设置随机种子
+    # 设置各库随机种子，确保极致稳定性
+    import random
+    import numpy as np
+    random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     
-    # 生成随机speaker embedding（用于控制音色和性别）
+    # 生成稳定的 speaker embedding
+    # [Fix] 移除重复调用，确保逻辑唯一
     spk_emb = chat.sample_random_speaker()
     
     logger.info(f"开始生成音频 - seed: {seed}, 原始文本长度: {raw_chars} 字符, 实际文字数: {text_chars} 字")
-    print(f"🎤 正在生成音频（seed: {seed}）...")
     
     # 记录开始时间
     start_time = time.time()
     
-    # 设置参数以避免文本被截断
-    params_refine = chat.RefineTextParams(max_new_token=8192)
-    params_infer = chat.InferCodeParams(spk_emb=spk_emb, max_new_token=8192)
+    # --- 阶段 1: 文本归一化 (Source of Truth) ---
+    # ChatTTS normalizer natively preserves [break_n] and other [tag] formats.
+    normalized_text = chat.normalizer(text, do_text_normalization=True, do_homophone_replacement=True)
+    logger.info(f"  normalized_text: {repr(normalized_text)}")
+    logger.info("  1. 文本归一化完成")
+
+    # --- 阶段 2: 文本润色 (Source of Prosody) ---
+    logger.info("  2. 正在进行文本润色 (获取语气Tags)...")
+    
+    # [Optimize] 彻底剥离所有符号和换行，仅保留纯文字供模型润色。
+    # 这样可以防止 [break_6] 等标签干扰模型导致其进入幻听循环。
+    # 由于后续有 align_text 逻辑，标签会在推理前被自动找回。
+    text_for_model = re.sub(r'\[.*?\]', '', text) # 移除所有 [tag]
+    text_for_model = re.sub(r'\s+', '', text_for_model) # 移除换行和空格
+    
+    # 自然度优先：Refine 0.7 提供更丰富的语气起伏
+    params_refine = chat.RefineTextParams(
+        temperature=0.7,
+        top_P=0.7,
+        prompt='[laugh_0][break_4]', 
+        max_new_token=1024,
+        manual_seed=seed
+    )
+    
+    refined_text_raw = chat.infer(
+        [text_for_model],
+        params_refine_text=params_refine,
+        refine_text_only=True,
+        split_text=True
+    )
+    
+    # Handle inference result (list or string)
+    if isinstance(refined_text_raw, list):
+        refined_text_combined = " ".join(refined_text_raw)
+    else:
+        refined_text_combined = refined_text_raw
+
+    # --- 阶段 3: 文本对齐 (Alignment) ---
+    logger.info("  3. 正在执行文本对齐 (去除幻觉)...")
+    from .text_aligner import align_text
+    aligned_text = align_text(normalized_text, refined_text_combined)
+    
+    # 统计修正情况
+    if aligned_text != refined_text_combined:
+        diff_len = len(refined_text_combined) - len(aligned_text)
+        logger.info(f"     ✅ 对齐修正完成 (差异字符数: {diff_len})")
+    
+    # --- 阶段 4: 音频推理 (Infer) ---
+    logger.info("  4. 正在生成音频波形...")
+    
+    # 推理温度保持 0.3 以锁定音色，去除语速 prompt 增加自然度
+    params_infer = chat.InferCodeParams(
+        spk_emb=spk_emb, 
+        max_new_token=2048,
+        temperature=0.3, 
+        top_P=0.7,
+        prompt='', # 去除固定语速，让模型根据上下文自然发挥
+        manual_seed=seed
+    )
+    
+    # [Safety] Final scrub: Ensure only standard tags exist in the final string
+    final_text = re.sub(r'\[\s*uv_break\s*\]', '[break_6]', aligned_text, flags=re.IGNORECASE)
+    whitelisted_prefixes = ['break_', 'laugh', 'oral_', 'speed_']
+    
+    def tag_safety_filter(match):
+        tag = match.group(0)
+        inner = tag[1:-1].lower()
+        if any(inner.startswith(p) for p in whitelisted_prefixes):
+            return tag
+        logger.warning(f"     🛡️  Safety Filter: Dropping suspicious tag {tag}")
+        return ""
+        
+    final_text = re.sub(r'\[.*?\]', tag_safety_filter, final_text)
+    
+    # [Debug] Log the definitive text string
+    logger.info(f"  Final Inference Text: {repr(final_text)}")
+    
+    # [Optimize] Disable split_text for segments shorter than 200 chars to prevent voice drift between splits
+    # Also ensure no weird whitespace is triggering internal splitting
+    final_text = re.sub(r'\s+', ' ', final_text).strip()
     
     wavs = chat.infer(
-        [text], 
+        [final_text], 
         use_decoder=True, 
-        params_refine_text=params_refine,
         params_infer_code=params_infer,
-        split_text=True,
-        max_split_batch=1
+        skip_refine_text=True, # Critical: Don't refine again!
+        do_text_normalization=False, # It's already been normalized/refined
+        split_text=True # Restore splitting for natural rhythm in longer segments
     )
     
     # 记录生成时间
@@ -202,6 +306,28 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
     if wav_tensor.shape[0] > wav_tensor.shape[-1]:
         wav_tensor = wav_tensor.T
     torchaudio.save(output_file, wav_tensor, 24000)
+    
+    # --- 阶段 5: 音频后处理 (Post-Processing) ---
+    # 1. 自动切除前后静音
+    # 2. 响度标准化 (-20 dBFS)
+    try:
+        sound = AudioSegment.from_wav(output_file)
+        
+        # 切除静音 (阈值 -50dB)
+        start_trim = detect_leading_silence(sound, -50.0)
+        end_trim = detect_leading_silence(sound.reverse(), -50.0)
+        # 给开头留 30ms 缓冲，避免切得太死
+        start_trim = max(0, start_trim - 30)
+        end_trim = max(0, end_trim - 30)
+        sound = sound[start_trim:len(sound)-end_trim]
+        
+        # 响度匹配
+        normalized_sound = match_target_amplitude(sound, -20.0)
+        normalized_sound.export(output_file, format="wav")
+        logger.info(f"  5. 音频后处理完成 (切除静音 + -20.0 dBFS)")
+    except Exception as e:
+        logger.error(f"  ❌ 响度标准化失败: {e}")
+
     save_time = time.time() - save_start_time
     
     total_time = time.time() - start_time
@@ -222,8 +348,7 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
     logger.info(f"    - 生成速度: {chars_per_second:.2f} 字/秒")
     logger.info(f"    - 音频/生成比: {audio_ratio:.2f}x")
     
-    print(f"✅ ChatTTS 生成完毕: {output_file}")
-    print(f"📊 统计: {text_chars} 字, {generation_time:.2f}秒生成, {audio_duration:.2f}秒音频, {chars_per_second:.2f}字/秒")
+    print(f"✅ 生成完毕: {output_file} ({generation_time:.2f}s, {audio_duration:.2f}s audio)")
 
 
 def main():

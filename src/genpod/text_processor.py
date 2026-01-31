@@ -98,17 +98,20 @@ def clean_text(text):
     3. 每句一行
     4. 去掉所有空格
     """
-    # 1. 阿拉伯数字转汉字
+    # 1. 替换非标准标签
+    text = text.replace('[uv_break]', '[break_6]').replace('[laugh]', '[laugh_0]')
+    
+    # 2. 阿拉伯数字转汉字
     text = number_to_chinese(text)
     
-    # 2. 逗号改句号
+    # 3. 逗号改句号
     text = text.replace('，', '。').replace(',', '。')
     
-    # 3. 按句号分割，每句一行
+    # 4. 按句号分割，每句一行
     sentences = text.split('。')
     sentences = [s.strip() for s in sentences if s.strip()]
     
-    # 4. 去掉每句中的空格
+    # 5. 去掉每句中的空格
     cleaned_sentences = [s.replace(' ', '') for s in sentences]
     
     # 重新组合，每句一行，最后加句号
@@ -179,12 +182,12 @@ def merge_paragraphs(paragraphs, min_chars=50, max_chars=200):
                     current = []
                     current_len = 0
                 
-                # 尝试在句子内找合适的截断点（句号、逗号、[uv_break]等）
+                # 尝试在句子内找合适的截断点（句号、逗号、[break_6]等）
                 # 如果找不到，就强制截断
                 if line_len > max_len:
-                    # 尝试在max_len附近找句号、逗号或[uv_break]
+                    # 尝试在max_len附近找句号、逗号或[break_6]
                     cut_pos = max_len
-                    for marker in ['。', '，', '[uv_break]', '。', '、']:
+                    for marker in ['。', '，', '[break_6]', '。', '、']:
                         pos = line.rfind(marker, 0, max_len)
                         if pos > max_len * 0.7:  # 至少要在70%的位置
                             cut_pos = pos + len(marker)

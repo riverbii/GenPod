@@ -1,0 +1,6 @@
+[console_scripts]
+genpod-batch = genpod.batch_generate:main
+genpod-concat = genpod.concatenate_podcast:main
+genpod-mix = genpod.mix_podcast:main
+genpod-single = genpod.generate_podcast:main
+genpod-sources = genpod.generate_sources:main
