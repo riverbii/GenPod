@@ -6,7 +6,6 @@
 
 import argparse
 import asyncio
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -30,7 +29,7 @@ def read_markdown_file(file_path):
 
 async def generate_dry_audio(text, voice, output_file, rate=None, pitch=None):
     """生成干音（主内容）"""
-    print(f"🎤 正在生成干音...")
+    print("🎤 正在生成干音...")
     # 构建 Communicate 参数
     communicate_kwargs = {}
     if rate:
@@ -47,7 +46,7 @@ def concatenate_audio_files(welcome_file, main_file, outro_file, output_file, fa
     """拼接音频文件"""
     from pydub import AudioSegment
     
-    print(f"🔗 正在拼接音频...")
+    print("🔗 正在拼接音频...")
     
     try:
         welcome = AudioSegment.from_file(welcome_file)
@@ -192,7 +191,7 @@ def main():
             date = datetime.strptime(date_str, '%Y-%m-%d')
         else:
             date = datetime.now()
-    except:
+    except Exception:
         date = datetime.now()
     
     date_str = date.strftime('%Y-%m-%d')
@@ -269,7 +268,7 @@ def main():
     
     print()
     print("=" * 60)
-    print(f"✨ 播客生成完成！")
+    print("✨ 播客生成完成！")
     print(f"📁 最终文件: {final_output_file}")
     print("=" * 60)
 

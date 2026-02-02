@@ -1,6 +1,5 @@
 import argparse
 import logging
-import multiprocessing
 import os
 import re
 import sys
@@ -154,7 +153,7 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
         original_text = text
         text = apply_pronunciations(text, combined_pronunciations)
         if text != original_text:
-            logger.info(f"  Applied pronunciation fixes. Text modified.")
+            logger.info("  Applied pronunciation fixes. Text modified.")
 
     chat = get_chat_instance()
     
@@ -268,8 +267,9 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
     logger.info(f"  Final Inference Text: {repr(final_text)}")
     
     # [Optimize] Disable split_text for segments shorter than 200 chars to prevent voice drift between splits
-    # Also ensure no weird whitespace is triggering internal splitting
-    final_text = re.sub(r'\s+', ' ', final_text).strip()
+    # Normalize whitespace but preserve intentional spaces (e.g., between English abbreviations)
+    # Only collapse newlines, tabs, and other non-space whitespace
+    final_text = re.sub(r'[\t\n\r\f\v]+', ' ', final_text).strip()
     
     wavs = chat.infer(
         [final_text], 
@@ -301,32 +301,50 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
     if output_path.suffix != '.wav':
         output_file = str(output_path.with_suffix('.wav'))
     
-    # 保存音频（采样率 24000）
-    save_start_time = time.time()
-    if wav_tensor.shape[0] > wav_tensor.shape[-1]:
-        wav_tensor = wav_tensor.T
-    torchaudio.save(output_file, wav_tensor, 24000)
+    # [Atomic Write] Use a temporary file to prevent partial writes
+    temp_output_file = str(output_path) + ".tmp"
     
-    # --- 阶段 5: 音频后处理 (Post-Processing) ---
-    # 1. 自动切除前后静音
-    # 2. 响度标准化 (-20 dBFS)
     try:
-        sound = AudioSegment.from_wav(output_file)
+        # 保存音频（采样率 24000）
+        save_start_time = time.time()
+        if wav_tensor.shape[0] > wav_tensor.shape[-1]:
+            wav_tensor = wav_tensor.T
+        torchaudio.save(temp_output_file, wav_tensor, 24000)
         
-        # 切除静音 (阈值 -50dB)
-        start_trim = detect_leading_silence(sound, -50.0)
-        end_trim = detect_leading_silence(sound.reverse(), -50.0)
-        # 给开头留 30ms 缓冲，避免切得太死
-        start_trim = max(0, start_trim - 30)
-        end_trim = max(0, end_trim - 30)
-        sound = sound[start_trim:len(sound)-end_trim]
+        # --- 阶段 5: 音频后处理 (Post-Processing) ---
+        # 1. 自动切除前后静音
+        # 2. 响度标准化 (-20 dBFS)
+        try:
+            sound = AudioSegment.from_wav(temp_output_file)
+            
+            # 切除静音 (阈值 -50dB)
+            start_trim = detect_leading_silence(sound, -50.0)
+            end_trim = detect_leading_silence(sound.reverse(), -50.0)
+            # 给开头留 30ms 缓冲，避免切得太死
+            start_trim = max(0, start_trim - 30)
+            end_trim = max(0, end_trim - 30)
+            sound = sound[start_trim:len(sound)-end_trim]
+            
+            # 响度匹配
+            normalized_sound = match_target_amplitude(sound, -20.0)
+            normalized_sound.export(temp_output_file, format="wav")
+            logger.info("  5. 音频后处理完成 (切除静音 + -20.0 dBFS)")
+        except Exception as e:
+            logger.error(f"  ❌ 响度标准化失败: {e}")
+            # If post-processing fails, we might still want the raw audio? 
+            # Ideally NO, let's keep it consistent. But for now, let's proceed with potentially raw audio if export failed?
+            # Actually, if export failed, temp_output_file might be raw or corrupted. 
+            # Let's assume torchaudio.save succeeded so at least we have that.
+            pass
+
+        # [Atomic Write] Commit the file
+        os.replace(temp_output_file, output_file)
         
-        # 响度匹配
-        normalized_sound = match_target_amplitude(sound, -20.0)
-        normalized_sound.export(output_file, format="wav")
-        logger.info(f"  5. 音频后处理完成 (切除静音 + -20.0 dBFS)")
     except Exception as e:
-        logger.error(f"  ❌ 响度标准化失败: {e}")
+        logger.error(f"❌ Failed to save audio: {e}")
+        if os.path.exists(temp_output_file):
+            os.remove(temp_output_file)
+        raise e
 
     save_time = time.time() - save_start_time
     
@@ -338,7 +356,7 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
     
     # 记录统计信息
     logger.info(f"音频生成完成 - 文件: {output_file}")
-    logger.info(f"  统计信息:")
+    logger.info("  统计信息:")
     logger.info(f"    - 原始文本长度: {raw_chars} 字符")
     logger.info(f"    - 实际文字数: {text_chars} 字")
     logger.info(f"    - 生成耗时: {generation_time:.2f} 秒")

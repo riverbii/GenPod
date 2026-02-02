@@ -1,6 +1,5 @@
 
 import ChatTTS
-import inspect
 
 chat = ChatTTS.Chat()
 

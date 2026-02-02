@@ -25,7 +25,7 @@ def run():
         ]
         try:
             subprocess.run(cmd, check=True, capture_output=True)
-            print(f"   ✅ Done")
+            print("   ✅ Done")
         except Exception as e:
             print(f"   ❌ Failed: {e}")
 

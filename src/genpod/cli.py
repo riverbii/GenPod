@@ -4,7 +4,6 @@ import logging
 import xml.sax.saxutils as saxutils
 from pathlib import Path
 import hashlib
-import json
 try:
     import tomllib
 except ImportError:
@@ -98,7 +97,7 @@ def compute_hash(text, seed):
     content = f"{text}{seed}"
     return hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
 
-def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, force=False, jobs=2):
+def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, force=False, jobs=2, episode_name_override=None):
     """Build the full podcast from input name or directory"""
     logger = setup_logging(verbose)
     
@@ -134,7 +133,7 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     if is_file_mode:
         # File mode: treat the file as script.md OR a segment file
         input_dir = input_path.parent
-        script_filename = input_path.name
+        # script_filename = input_path.name
         
         # [Fix]: Smart detection of episode name from directory structure
         # [Fix]: Smart detection of episode name from directory structure
@@ -160,9 +159,13 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     else:
         # Directory mode: expect script.md inside
         input_dir = input_path
-        script_filename = "script.md"
+        # script_filename = "script.md"
         episode_name = input_dir.name
         script_path = input_dir / "script.md"
+
+    # [Fix]: Allow explicit override of episode name
+    if episode_name_override:
+        episode_name = episode_name_override
 
     if not input_path.exists():
         logger.error(f"Input not found: {input_path}")
@@ -179,7 +182,7 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     
     # Load config 
     # Try finding config in standard places
-    config_path = Path.cwd() / "genpod.toml"
+    # config_path = Path.cwd() / "genpod.toml"
     config = load_config(input_dir if not is_file_mode else Path.cwd())
     config["jobs"] = jobs
     seed = config["voice_seed"]
@@ -326,7 +329,8 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
         import multiprocessing
         
         num_workers = config.get("jobs", 1)
-        if num_workers < 1: num_workers = 1
+        if num_workers < 1:
+            num_workers = 1
         # Cap workers to avoid OOM (ChatTTS is heavy)
         if num_workers > 4: 
              logger.warning("Limiting workers to 4 to prevent Out Of Memory")
@@ -395,7 +399,7 @@ def build_podcast(input_name, output_dir_str=None, workdir=None, verbose=False, 
     else:
         logger.info("✅ Single segment generation complete. Skipped full podcast assembly.")
         
-    logger.info(f"Build complete!")
+    logger.info("Build complete!")
     logger.info(f"  Final: {final_file if (welcome_file and outro_file) else 'N/A'}")
     logger.info(f"  Dry:   {dry_file}")
     logger.info(f"  Segments: {segments_dir}")
@@ -433,7 +437,7 @@ def check_script(input_name, workdir=None, verbose=False):
     print(f"   Total Paragraphs: {len(paragraphs)}\n")
     
     # Create directory for washed markdown segments for inspection
-    input_base = input_dir.parent
+    # input_base = input_dir.parent
     # Assuming standard structure workspace/input/DATE, output should be workspace/output/DATE
     # But check_script logic for path resolution is a bit different, let's try to infer output dir 
     # taking into account workdir if present, or just use input_dir logic
@@ -527,7 +531,7 @@ def manage_config(init=False):
     if init:
         target_path = Path.cwd() / "genpod.toml"
         if target_path.exists():
-            print(f"❌ Error: 'genpod.toml' already exists in current directory.")
+            print("❌ Error: 'genpod.toml' already exists in current directory.")
             sys.exit(1)
             
         template_path = get_template_path("genpod.toml")
@@ -571,7 +575,8 @@ def generate_rss(project_dir):
         audio_files = []
         for ext in audio_exts:
             audio_files = list(ep_dir.glob(ext))
-            if audio_files: break
+            if audio_files:
+                break
             
         if not audio_files:
             continue
@@ -586,7 +591,8 @@ def generate_rss(project_dir):
         # Title
         title = ep_id
         title_file = ep_dir / "title.md"
-        if not title_file.exists(): title_file = ep_dir / f"{ep_id}_title.md"
+        if not title_file.exists():
+            title_file = ep_dir / f"{ep_id}_title.md"
         
         if title_file.exists():
             with open(title_file, "r", encoding="utf-8") as f:
@@ -596,7 +602,8 @@ def generate_rss(project_dir):
         description = ""
         summary = ""
         shownotes_file = ep_dir / "shownotes.md"
-        if not shownotes_file.exists(): shownotes_file = ep_dir / f"{ep_id}_shownotes.md"
+        if not shownotes_file.exists():
+            shownotes_file = ep_dir / f"{ep_id}_shownotes.md"
         
         if shownotes_file.exists():
             with open(shownotes_file, "r", encoding="utf-8") as f:
@@ -605,7 +612,8 @@ def generate_rss(project_dir):
         else:
             # Fallback to script preview
             script_file = ep_dir / "script.md"
-            if not script_file.exists(): script_file = ep_dir / f"{ep_id}_script.md"
+            if not script_file.exists():
+                script_file = ep_dir / f"{ep_id}_script.md"
             if script_file.exists():
                 with open(script_file, "r", encoding="utf-8") as f:
                     script_text = f.read().strip()
@@ -629,7 +637,7 @@ def generate_rss(project_dir):
             from pydub.utils import mediainfo
             info = mediainfo(str(audio_path))
             duration_sec = int(float(info.get('duration', 0)))
-        except:
+        except Exception:
             # Simple fallback if possible (very rough approx for wav)
             if audio_path.suffix.lower() == ".wav":
                 # WAV: samples = file_size / (channels * bytes_per_sample)
@@ -643,7 +651,8 @@ def generate_rss(project_dir):
             try:
                 date_obj = datetime.datetime.strptime(ep_id, "%Y%m%d")
                 pub_date = date_obj.strftime("%a, %d %b %Y 08:00:00 +0800")
-            except: pass
+            except Exception:
+                pass
             
         # Escape XML entities for non-CDATA fields
         safe_title = saxutils.escape(title)
@@ -760,6 +769,32 @@ def merge_segments(episode_name, workdir=None, output_file=None):
         print("❌ No segment files found.")
         sys.exit(1)
         
+    # [Validation] Ensure segment continuity
+    indices = []
+    for f in files:
+        match = re.search(r"segment_(\d{3})_", f.name)
+        if match:
+            indices.append(int(match.group(1)))
+            
+    if not indices:
+         print("❌ Error: No valid numbered segments found.")
+         sys.exit(1)
+         
+    # Check for gaps
+    max_idx = indices[-1]
+    expected_set = set(range(1, max_idx + 1))
+    actual_set = set(indices)
+    missing = sorted(list(expected_set - actual_set))
+    
+    if missing:
+        print(f"❌ Error: Missing segments detected! The following segments (1-{max_idx}) are missing:")
+        print(f"   {missing}")
+        print("   Merge aborted to prevent data loss. Please regenerate missing segments.")
+        sys.exit(1)
+
+    if indices[0] != 1:
+        print(f"⚠️ Warning: Segments start at {indices[0]}, not 001.")
+
     full_text = ""
     for f in files:
         with open(f, "r", encoding="utf-8") as fs:
@@ -799,6 +834,7 @@ def main():
     build_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     build_parser.add_argument("-f", "--force", action="store_true", help="Force regenerate all segments")
     build_parser.add_argument("-j", "--jobs", type=int, default=2, help="Number of parallel generation jobs (default: 2)")
+    build_parser.add_argument("-n", "--name", help="Explicit episode name (output directory name)")
     
     # Check Command
     check_parser = subparsers.add_parser("check", help="Check script segmentation")
@@ -848,7 +884,7 @@ def main():
         # I will handle this by injecting into config? No, that's messy.
         
         # Let's Change:
-        build_podcast(args.input, args.output, args.workdir, args.verbose, args.force, args.jobs)
+        build_podcast(args.input, args.output, args.workdir, args.verbose, args.force, args.jobs, episode_name_override=args.name)
     elif args.command == "check":
         check_script(args.input, args.workdir, args.verbose)
     elif args.command == "init":

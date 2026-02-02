@@ -1,7 +1,6 @@
 
 import ChatTTS
 import torch
-from pathlib import Path
 
 # Load Model
 chat = ChatTTS.Chat()

@@ -1,5 +1,4 @@
 import re
-from pathlib import Path
 
 
 def number_to_chinese(num_str):
@@ -11,7 +10,7 @@ def number_to_chinese(num_str):
     }
     
     # 单位映射
-    unit_map = ['', '十', '百', '千', '万']
+    # unit_map = ['', '十', '百', '千', '万']
     
     def convert_number(n):
         """转换数字为汉字（支持完整读法，如25 -> 二十五，年份逐位转换如2026 -> 二零二六）"""
@@ -111,8 +110,9 @@ def clean_text(text):
     sentences = text.split('。')
     sentences = [s.strip() for s in sentences if s.strip()]
     
-    # 5. 去掉每句中的空格
-    cleaned_sentences = [s.replace(' ', '') for s in sentences]
+    # 5. 保留句子中的空格（用户可能有意添加，如英文缩写）
+    # cleaned_sentences = [s.replace(' ', '') for s in sentences]  # 已禁用
+    cleaned_sentences = sentences
     
     # 重新组合，每句一行，最后加句号
     result = '\n'.join([s + '。' for s in cleaned_sentences if s])

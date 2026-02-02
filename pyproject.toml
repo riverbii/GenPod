@@ -17,15 +17,29 @@ dependencies = [
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.1.0",
+]
+
 [project.scripts]
 genpod = "genpod.cli:main"
 
 [tool.uv]
 package = true
 
+[tool.ruff]
+extend-exclude = ["debug_text_flow.py", "regenerate_final.py", "inspect_*.py"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.14",
+]
 
 [tool.hatch.metadata]
 allow-direct-references = true
