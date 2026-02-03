@@ -854,6 +854,36 @@ def merge_segments(episode_name, workdir=None, output_file=None):
     print(f"✅ Merged {len(files)} segments into: {out_path}")
 
 
+def deploy_episode(episode_name, project_dir="."):
+    """Deploy archived episode to public docs directory"""
+    root = Path(project_dir).resolve()
+    episodes_dir = root / "episodes" / episode_name
+    docs_audio_dir = root / "docs" / "audio"
+    
+    if not episodes_dir.exists():
+        print(f"❌ Error: Archived episode not found: {episodes_dir}")
+        sys.exit(1)
+        
+    # Find final mp3
+    mp3_files = list(episodes_dir.glob("*_final.mp3"))
+    if not mp3_files:
+        print(f"❌ Error: Final MP3 not found in {episodes_dir}")
+        sys.exit(1)
+        
+    final_mp3 = mp3_files[0]
+    target_mp3 = docs_audio_dir / final_mp3.name
+    
+    # Ensure target dir exists
+    docs_audio_dir.mkdir(parents=True, exist_ok=True)
+    
+    import shutil
+    print(f"🚀 Deploying {final_mp3.name} to {docs_audio_dir}...")
+    shutil.copy2(final_mp3, target_mp3)
+    
+    print(f"✅ Deployment complete: {target_mp3}")
+    print("Next steps: Update docs/index.html and run 'genpod rss'")
+
+
 def main():
     parser = argparse.ArgumentParser(description="GenPod CLI Tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -898,6 +928,11 @@ def main():
     merge_parser.add_argument("-w", "--workdir", help="Base workspace directory")
     merge_parser.add_argument("-o", "--output", help="Output file path")
 
+    # Deploy Command
+    deploy_parser = subparsers.add_parser("deploy", help="Deploy archived episode to docs/audio")
+    deploy_parser.add_argument("episode", help="Episode name (e.g. 20260131)")
+    deploy_parser.add_argument("-p", "--project", default=".", help="Project root directory (default: .)")
+
     args = parser.parse_args()
     
     if args.command == "build":
@@ -929,6 +964,8 @@ def main():
         audition_voices(count=args.count, text=args.text, workdir=args.workdir)
     elif args.command == "merge":
         merge_segments(args.episode, args.workdir, args.output)
+    elif args.command == "deploy":
+        deploy_episode(args.episode, args.project)
 
 
 
