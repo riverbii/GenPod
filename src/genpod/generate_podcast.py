@@ -309,7 +309,7 @@ def generate_audio(text, voice, output_file, rate=None, pitch=None, logger=None,
         save_start_time = time.time()
         if wav_tensor.shape[0] > wav_tensor.shape[-1]:
             wav_tensor = wav_tensor.T
-        torchaudio.save(temp_output_file, wav_tensor, 24000)
+        torchaudio.save(temp_output_file, wav_tensor, 24000, format="wav")
         
         # --- 阶段 5: 音频后处理 (Post-Processing) ---
         # 1. 自动切除前后静音

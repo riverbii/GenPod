@@ -13,6 +13,7 @@ DEFAULT_PRONUNCIATIONS = {
     "Gemini": "Gemini",
     "Gemma": "Gemma",
     "Ollama": "Ollama",
+    "Nvidia": "英伟达",
     "SAE": "S A E",
     "Veo": "Veo",
     "Wiz": "Wiz",

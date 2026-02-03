@@ -100,6 +100,10 @@ def clean_text(text):
     # 1. 替换非标准标签
     text = text.replace('[uv_break]', '[break_6]').replace('[laugh]', '[laugh_0]')
     
+    # [Normalization] Standardize entity names to Chinese for better pronunciation
+    # Nvidia / N.vidia -> 英伟达
+    text = re.sub(r'N\.?vidia', '英伟达', text, flags=re.IGNORECASE)
+    
     # 2. 阿拉伯数字转汉字
     text = number_to_chinese(text)
     
