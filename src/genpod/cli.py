@@ -76,18 +76,44 @@ def load_config(input_dir):
     if local_config.resolve() != (input_dir / "genpod.toml").resolve():
         merge_from_file(local_config, "local")
 
-    # 1. Episode/Project Configuration (search up from input_dir)
-    # Search up the directory tree from input_dir for genpod.toml
-    if (input_dir / "genpod.toml").exists():
-        merge_from_file(input_dir / "genpod.toml", "episode_folder")
-        config["__project_root__"] = str(input_dir)
-    else:
-        # If no episode config, use input_dir as default root if not set by local/global
-        # But actually, if local_config was loaded and is different, that might be the root.
-        # Let's rely on standard logic:
-        # If we are running from project root, local_config is loaded.
-        pass
+    # 1. Project/Episode Configuration (Search up from input_dir)
+    # Traverse up from input_dir to find genpod.toml
+    current_dir = input_dir.resolve()
+    # Limit traversal to avoid infinite loops or going too far up (e.g. stop at user home or root)
+    # We'll traverse up to 4 levels or untill we hit a boundary
+    
+    # Check input_dir and its parents
+    # We want to find the *closest* config? Or the *root* config?
+    # Usually: Project Root Config -> Episode Config (override)
+    # But current implementation is simple merge. 
+    # Let's search from Root DOWN to Input?
+    # Or Search UP and merge?
+    # Standard: Load Project Root, then load Episode specific if exists.
+    
+    # Let's try to find "Project Root" by looking for genpod.toml up the tree
+    candidates = []
+    p = current_dir
+    for _ in range(5): # Check up to 5 parent levels
+        if (p / "genpod.toml").exists():
+            candidates.append(p / "genpod.toml")
+        if p.parent == p: # Root
+            break
+        p = p.parent
         
+    # Apply them in reverse order (Root first, then specific)
+    # candidates is [closest, ..., furthest]
+    # We want [furthest, ..., closest]
+    for cfg_path in reversed(candidates):
+        # Skip if it's the same as local_config (cwd) we already loaded?
+        # Maybe re-loading is fine, update overwrites.
+        if cfg_path.resolve() == local_config.resolve():
+             continue
+             
+        merge_from_file(cfg_path, "project/episode")
+        # Assume the furthest one is the project root
+        if "__project_root__" not in config:
+             config["__project_root__"] = str(cfg_path.parent)
+
     return config
             
     return config
@@ -453,7 +479,8 @@ def check_script(input_name, workdir=None, verbose=False):
              output_base = Path.cwd() / "output"
 
     episode_name = input_dir.name
-    segments_md_dir = output_base / episode_name / f"{episode_name}_segments_md"
+    # [Fix] Naming consistency with build_podcast
+    segments_md_dir = output_base / episode_name / "segments_md"
     segments_md_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Saving debug segments to: {segments_md_dir}")
@@ -751,15 +778,20 @@ def merge_segments(episode_name, workdir=None, output_file=None):
     import re
     if workdir:
         base_dir = Path(workdir).resolve()
-        segments_dir = base_dir / "output" / episode_name / f"{episode_name}_segments_md"
+        segments_dir = base_dir / "output" / episode_name / "segments_md"
     else:
         # Try to guess
         base_dir = Path.cwd()
-        segments_dir = base_dir / f"{episode_name}_segments_md"
+        segments_dir = base_dir / "segments_md"
         
     if not segments_dir.exists():
-        print(f"❌ Error: Segments directory not found: {segments_dir}")
-        sys.exit(1)
+        # [Fallback] Check legacy naming
+        legacy_dir = base_dir / "output" / episode_name / f"{episode_name}_segments_md" if workdir else base_dir / f"{episode_name}_segments_md"
+        if legacy_dir.exists():
+            segments_dir = legacy_dir
+        else:
+            print(f"❌ Error: Segments directory not found: {segments_dir}")
+            sys.exit(1)
         
     print(f"🔍 Merging segments from: {segments_dir}")
     
