@@ -70,27 +70,22 @@ def load_config(input_dir):
     global_config = Path.home() / ".genpod.toml"
     merge_from_file(global_config, "global")
     
-    # 2. Local Configuration (./genpod.toml) - only if different from input_dir
+    # Define a set to keep track of loaded config paths
+    loaded_configs = set()
+    
+    def merge_from_file_with_tracker(path, name):
+        resolved_path = path.resolve()
+        if resolved_path not in loaded_configs:
+            merge_from_file(path, name)
+            loaded_configs.add(resolved_path)
+
+    # 2. Local Configuration (./genpod.toml)
     local_config = Path.cwd() / "genpod.toml"
-    # Ensure we don't load the same file twice if input_dir is current dir
     if local_config.resolve() != (input_dir / "genpod.toml").resolve():
-        merge_from_file(local_config, "local")
+        merge_from_file_with_tracker(local_config, "local")
 
     # 1. Project/Episode Configuration (Search up from input_dir)
-    # Traverse up from input_dir to find genpod.toml
     current_dir = input_dir.resolve()
-    # Limit traversal to avoid infinite loops or going too far up (e.g. stop at user home or root)
-    # We'll traverse up to 4 levels or untill we hit a boundary
-    
-    # Check input_dir and its parents
-    # We want to find the *closest* config? Or the *root* config?
-    # Usually: Project Root Config -> Episode Config (override)
-    # But current implementation is simple merge. 
-    # Let's search from Root DOWN to Input?
-    # Or Search UP and merge?
-    # Standard: Load Project Root, then load Episode specific if exists.
-    
-    # Let's try to find "Project Root" by looking for genpod.toml up the tree
     candidates = []
     p = current_dir
     for _ in range(5): # Check up to 5 parent levels
@@ -101,16 +96,8 @@ def load_config(input_dir):
         p = p.parent
         
     # Apply them in reverse order (Root first, then specific)
-    # candidates is [closest, ..., furthest]
-    # We want [furthest, ..., closest]
     for cfg_path in reversed(candidates):
-        # Skip if it's the same as local_config (cwd) we already loaded?
-        # Maybe re-loading is fine, update overwrites.
-        if cfg_path.resolve() == local_config.resolve():
-             continue
-             
-        merge_from_file(cfg_path, "project/episode")
-        # Assume the furthest one is the project root
+        merge_from_file_with_tracker(cfg_path, "project/episode")
         if "__project_root__" not in config:
              config["__project_root__"] = str(cfg_path.parent)
 
