@@ -40,17 +40,7 @@ def load_config(input_dir):
         "welcome_audio": None,
         "outro_bgm": None,
         "fade_duration": 500,
-        # RSS / Channel Metadata
-        "podcast_title": "My Awesome Podcast",
-        "podcast_description": "A podcast about cool things.",
-        "podcast_link": "https://example.com",
-        "podcast_language": "zh-cn",
-        "podcast_author": "Author Name",
-        "podcast_email": "hello@example.com",
-        "podcast_image": "https://example.com/cover.jpg",
-        "podcast_category": "Technology",
-        "podcast_copyright": "2026 Author",
-        "podcast_audio_url_prefix": None  # Defaults to podcast_link/audio if None
+        "podcast_audio_url_prefix": None
     }
     
     # helper to merge config
@@ -63,8 +53,10 @@ def load_config(input_dir):
                     logger.info(f"Loaded {name} config from {path}. Keys: {list(user_config.keys())}")
                     if "welcome_audio" in user_config:
                          logger.info(f"  -> welcome_audio: {user_config['welcome_audio']}")
+                return True
             except Exception as e:
                 logger.warning(f"Failed to load {name} config from {path}: {e}")
+        return False
 
     # 3. Global Configuration (~/.genpod.toml)
     global_config = Path.home() / ".genpod.toml"
@@ -76,8 +68,8 @@ def load_config(input_dir):
     def merge_from_file_with_tracker(path, name):
         resolved_path = path.resolve()
         if resolved_path not in loaded_configs:
-            merge_from_file(path, name)
-            loaded_configs.add(resolved_path)
+            if merge_from_file(path, name):
+                loaded_configs.add(resolved_path)
 
     # 2. Local Configuration (./genpod.toml)
     local_config = Path.cwd() / "genpod.toml"
@@ -100,6 +92,10 @@ def load_config(input_dir):
         merge_from_file_with_tracker(cfg_path, "project/episode")
         if "__project_root__" not in config:
              config["__project_root__"] = str(cfg_path.parent)
+
+    if not loaded_configs:
+        logger.error("No project 'genpod.toml' detected. Please create one or run 'genpod init'.")
+        sys.exit(1)
 
     return config
             
